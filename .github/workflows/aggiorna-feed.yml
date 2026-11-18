@@ -1,0 +1,43 @@
+name: Aggiorna feed ChatGPT
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"   # ogni 6 ore
+  workflow_dispatch:          # avvio manuale da Actions
+  push:
+    branches: [main]
+    paths: [".github/workflows/aggiorna-feed.yml"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: feed
+  cancel-in-progress: false
+
+jobs:
+  aggiorna:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scarica il feed da Shopify
+        run: |
+          curl -fsSL --retry 3 --retry-delay 10 \
+            -A "Mozilla/5.0 (RaninFeedBot; +https://ranincornici.com)" \
+            "https://ranincornici.com/collections/all?view=chatgpt-feed" -o nuovo.csv
+          # toglie righe vuote e spazi finali
+          sed -i -e 's/[[:space:]]*$//' -e '/^$/d' nuovo.csv
+          head -c 7 nuovo.csv | grep -q '^item_id' || { echo "Intestazione non valida"; head -c 300 nuovo.csv; exit 1; }
+          righe=$(($(wc -l < nuovo.csv) - 1))
+          echo "Prodotti nel feed: $righe"
+          [ "$righe" -ge 10 ] || { echo "Troppo pochi prodotti, non aggiorno"; exit 1; }
+          mv nuovo.csv feed.csv
+          date -u +%Y-%m-%d > aggiornato.txt
+
+      - name: Salva se cambiato
+        run: |
+          git config user.name "feed-bot"
+          git config user.email "feed-bot@users.noreply.github.com"
+          git add feed.csv aggiornato.txt
+          git diff --cached --quiet && echo "Nessuna modifica" || { git commit -m "Aggiorna feed $(date -u +%F\ %H:%M)"; git push; }
